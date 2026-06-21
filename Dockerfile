@@ -1,9 +1,19 @@
 FROM nginxinc/nginx-unprivileged:1.31-trixie-perl
 
+ARG UID=101
+ARG GID=101
+
+USER root
+RUN test $GID -eq 101 || groupmod -g ${GID} nginx
+RUN test $UID -eq 101 || usermod -u ${UID} -g ${GID} nginx
+RUN test $UID -eq 101 || find /etc/nginx -user 101 -exec chown $UID:0 {} +
+RUN test $UID -eq 101 || find /var/cache/nginx -user 101 -exec chown $UID:0 {} +
+USER $UID
+
 # https://github.com/lancachenet/ubuntu-nginx/blob/master/Dockerfile
 
 RUN mkdir -p /etc/nginx/stream.d
-COPY --from=lancachenet/ubuntu-nginx:latest --chown=nginx:root /etc/nginx/stream.d/ /etc/nginx/stream.d/
+COPY --from=lancachenet/ubuntu-nginx:latest --chown=$UID:0 /etc/nginx/stream.d/ /etc/nginx/stream.d/
 
 # https://github.com/lancachenet/monolithic/blob/master/Dockerfile
 
@@ -15,7 +25,7 @@ USER root
 RUN	apt-get update							;\
 	apt-get install -y jq git				;\
     rm -rf /var/lib/apt/lists/*             ;
-USER nginx
+USER $UID
 
 ENV GENERICCACHE_VERSION=2 \
     CACHE_MODE=monolithic \
@@ -33,15 +43,15 @@ ENV GENERICCACHE_VERSION=2 \
     NGINX_LOG_FORMAT=cachelog
 
 RUN rm /etc/nginx/conf.d/default.conf
-COPY --chown=nginx:root overlay/ /
+COPY --chown=$UID:0 overlay/ /
 
 USER root
 RUN mkdir -m 755 -p /data; \
-    chown -R nginx:root /data
+    chown -R $UID:0 /data
 RUN chmod +x /scripts/* /hooks/entrypoint-pre.d/* /hooks/supervisord-pre.d/*; \
     ln -s /hooks/entrypoint-pre.d/* /docker-entrypoint.d/; \
     ln -s /hooks/supervisord-pre.d/* /docker-entrypoint.d/
-USER nginx
+USER $UID
 
 RUN mkdir -m 755 -p /data/cache		;\
 	mkdir -m 755 -p /data/info		;\
