@@ -1,0 +1,79 @@
+name: Docker (lancache-monolithic-unifi)
+
+on:
+  push:
+    branches: ['main']
+    paths:
+      - .github/workflows/docker.yaml
+      - overlay/**
+      - overlay-ubuntu-nginx/**
+      - docker-bake.hcl
+      - Dockerfile
+  pull_request:
+    paths:
+      - .github/workflows/docker.yaml
+      - overlay/**
+      - overlay-ubuntu-nginx/**
+      - docker-bake.hcl
+      - Dockerfile
+  schedule:
+    - cron: '30 5 1 * *'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: hjwylde/lancache-monolithic-unifi
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+      - name: Log into ${{ env.REGISTRY }}
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch,enable={{is_not_default_branch}}
+            type=ref,event=pr
+            type=sha
+
+      - name: Run Docker Bake
+        uses: docker/bake-action@6614cfa25eff9a0b2b2697efb0b6159e7680d584 # v7
+        with:
+          source: "."
+          provenance: false
+          sbom: false
+          files: |
+            docker-bake.hcl
+            cwd://${{ steps.meta.outputs.bake-file }}
+          push: ${{ github.event_name != 'pull_request' }}
+          set: |
+            *.args.UID=977
+            *.args.GID=988
+            *.cache-to=type=gha,mode=max
+            *.cache-from=type=gha
