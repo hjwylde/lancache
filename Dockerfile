@@ -1,14 +1,24 @@
-FROM lancachenet/ubuntu-nginx:latest
+FROM nginxinc/nginx-unprivileged:1.31-trixie-perl
+
+# https://github.com/lancachenet/ubuntu-nginx/blob/master/Dockerfile
+
+RUN mkdir -p /etc/nginx/stream.d
+COPY --from=lancachenet/ubuntu-nginx:latest --chown=nginx:root /etc/nginx/stream.d/ /etc/nginx/stream.d/
+
+# https://github.com/lancachenet/monolithic/blob/master/Dockerfile
+
 LABEL version=3
 LABEL description="Single caching container for caching game content at LAN parties."
 LABEL maintainer="LanCache.Net Team <team@lancache.net>"
 
+USER root
 RUN	apt-get update							;\
-	apt-get install -y jq git				;
+	apt-get install -y jq git				;\
+    rm -rf /var/lib/apt/lists/*             ;
+USER nginx
 
 ENV GENERICCACHE_VERSION=2 \
     CACHE_MODE=monolithic \
-    WEBUSER=www-data \
     CACHE_INDEX_SIZE=500m \
     CACHE_DISK_SIZE=1000g \
     MIN_FREE_DISK=10g \
@@ -22,29 +32,29 @@ ENV GENERICCACHE_VERSION=2 \
     NGINX_WORKER_PROCESSES=auto \
     NGINX_LOG_FORMAT=cachelog
 
-COPY overlay/ /
+RUN rm /etc/nginx/conf.d/default.conf
+COPY --chown=nginx:root overlay/ /
 
-RUN rm /etc/nginx/sites-enabled/* /etc/nginx/stream-enabled/* ;\
-    rm /etc/nginx/conf.d/gzip.conf ;\
-    chmod 754  /var/log/tallylog ; \
-    id -u ${WEBUSER} &> /dev/null || adduser --system --home /var/www/ --no-create-home --shell /bin/false --group --disabled-login ${WEBUSER} ;\
-    chmod 755 /scripts/*		;\
-	  mkdir -m 755 -p /data/cache		;\
-	  mkdir -m 755 -p /data/info		;\
+USER root
+RUN mkdir -m 755 -p /data; \
+    chown -R nginx:root /data
+RUN chmod +x /scripts/* /hooks/entrypoint-pre.d/* /hooks/supervisord-pre.d/*; \
+    ln -s /hooks/entrypoint-pre.d/* /docker-entrypoint.d/; \
+    ln -s /hooks/supervisord-pre.d/* /docker-entrypoint.d/
+USER nginx
+
+RUN mkdir -m 755 -p /data/cache		;\
+	mkdir -m 755 -p /data/info		;\
     mkdir -m 755 -p /data/logs		;\
-    mkdir -m 755 -p /tmp/nginx/		;\
-    chown -R ${WEBUSER}:${WEBUSER} /data/	;\
     mkdir -p /etc/nginx/sites-enabled	;\
+    mkdir -p /etc/nginx/stream-enabled ;\
     ln -s /etc/nginx/sites-available/10_cache.conf /etc/nginx/sites-enabled/10_generic.conf; \
     ln -s /etc/nginx/sites-available/20_upstream.conf /etc/nginx/sites-enabled/20_upstream.conf; \
     ln -s /etc/nginx/sites-available/30_metrics.conf /etc/nginx/sites-enabled/30_metrics.conf; \
-    ln -s /etc/nginx/stream-available/10_sni.conf /etc/nginx/stream-enabled/10_sni.conf; \
-    mkdir -m 755 -p /data/cachedomains		;\
-    mkdir -m 755 -p /tmp/nginx
+    ln -s /etc/nginx/stream-available/10_sni.conf /etc/nginx/stream-enabled/10_sni.conf
 
 RUN git clone --depth=1 --no-single-branch https://github.com/uklans/cache-domains/ /data/cachedomains
 
-VOLUME ["/data/logs", "/data/cache", "/data/cachedomains", "/var/www"]
+VOLUME ["/data/logs", "/data/cache", "/data/cachedomains", "/usr/share/nginx"]
 
-EXPOSE 80 443 8080
-WORKDIR /scripts
+EXPOSE 8080 8081 8443
